@@ -269,7 +269,7 @@ const Recipe = () => {
       if (selectedRecipe?.trim() !== "") {
         saveToDatabase(true);
       }
-    }, 3000); 
+    }, 1000); 
 
     return () => clearInterval(interval);
   }, [selectedRecipe, coachName, prescriptionDate, saveToDatabase]);
