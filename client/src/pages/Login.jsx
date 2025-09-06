@@ -24,7 +24,7 @@ const Login = ({ onAuthenticate }) => {
       onAuthenticate(); // Keep App in sync
       navigate("/patients");
     } else {
-      navigate("/login"); // Redirect to login if not authenticated
+      navigate("/login"); // Redirect to login if not authenticate
     }
   }, [navigate, onAuthenticate]);
 

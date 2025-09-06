@@ -9,7 +9,7 @@ import Recipe from "./pages/Recipe";
 import PatientPrescriptions from "./pages/PatientPrescriptions";
 import AllRecipe from "./pages/AllRecipe";
 import { ToastContainer } from "react-toastify";
-import { LangProvider } from "./langContext";
+import { LangProvider } from "./LangContext";
 
 function PrivateRoute({ children, isAuthenticated }) {
   return isAuthenticated ? children : <Navigate to="/login" />;

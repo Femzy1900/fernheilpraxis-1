@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { FaPrint, FaFilePdf, FaGoogleDrive } from "react-icons/fa";
 import RecipeBar from "../components/RecipeBar";
 import remediesData from "../data/remedies.json";
@@ -41,12 +41,14 @@ const Recipe = () => {
   const [coachName, setCoachName] = useState("");
   const [patientName, setPatientName] = useState("");
   const [prescriptionDate, setPrescriptionDate] = useState(formatTodayDate());
+  const [prescriptionId, setPrescriptionId] = useState(null);
 
   const [selectedRecipe, setSelectedRecipe] = useState("");
   const { patientId } = useParams();
 
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef();
+  const savingRef = useRef(false);
 
   const { t } = useLang();
 
@@ -54,39 +56,56 @@ const Recipe = () => {
     setIsOpen(!isOpen);
   };
 
-  // Save prescription to firebase
-  const handleSaveToDatabase = async () => {
-    if (!coachName || !prescriptionDate || !selectedRecipe) {
-      toast.error(t.fillAllFields || "Bitte füllen Sie alle Felder aus.");
-      return;
-    }
+  // 1. Block browser back navigation
+  useEffect(() => {
+    const handlePopState = (e) => {
+      const hasUnsavedData =
+        (selectedRecipe && selectedRecipe.trim() !== "") ||
+        (coachName && coachName.trim() !== "") ||
+        (patientName && patientName.trim() !== "");
 
-    try {
-      const [year, month, day] = prescriptionDate.split("-");
-      const parsedDate = new Date(`${year}-${month}-${day}`);
+      if (hasUnsavedData) {
+        const confirmLeave = window.confirm(
+          "⚠️ You have unsaved changes. Are you sure you want to leave this page?"
+        );
 
-      const prescriptionRef = collection(
-        db,
-        "patients",
-        patientId,
-        "prescriptions"
-      );
-      await addDoc(prescriptionRef, {
-        coachName,
-        content: selectedRecipe,
-        date: Timestamp.fromDate(parsedDate),
-        createdAt: Timestamp.now(),
-      });
+        if (!confirmLeave) {
+          // ❌ Cancelled → push state back once so user stays
+          history.pushState(null, "", window.location.href);
+        } else {
+          // ✅ Confirmed → redirect
+          navigate(`/patients/${patientId}`, { replace: true });
+        }
+      } else {
+        // No unsaved data → go straight to patients
+        navigate(`/patients/${patientId}`, { replace: true });
+      }
+    };
 
-      toast.success(t.recipeAdded || "Rezept erfolgreich hinzugefügt!");
-      navigate(`/patients/${patientId}`); // <-- Add this line
-    } catch (error) {
-      console.error("Error saving prescription:", error);
-      toast.error(
-        t.failedToSavePrescription || "Speichern des Rezepts fehlgeschlagen."
-      );
-    }
-  };
+    // Push one fake state on mount so back triggers popstate
+    history.pushState(null, "", window.location.href);
+    window.addEventListener("popstate", handlePopState);
+
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+    };
+  }, [selectedRecipe, coachName, patientName, patientId, navigate]);
+
+  // 2. Block reload/tab close
+  useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      const hasUnsavedData =
+        (selectedRecipe && selectedRecipe.trim() !== "") ||
+        (coachName && coachName.trim() !== "") ||
+        (patientName && patientName.trim() !== "");
+      if (hasUnsavedData) {
+        e.preventDefault();
+        e.returnValue = ""; // Required for Chrome
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [selectedRecipe, coachName, patientName]);
 
   // Close dropdown if clicked outside
   useEffect(() => {
@@ -161,6 +180,103 @@ const Recipe = () => {
       console.error("Error adding recipe: ", error);
       toast.error("Failed to add recipe.");
     }
+  };
+
+  // 🔹 Save function (works for both autosave + manual)
+  const saveToDatabase = useCallback(
+    async (auto = false) => {
+      if (!selectedRecipe) return;
+      if (savingRef.current) return;
+
+      try {
+        savingRef.current = true;
+
+        const [year, month, day] = prescriptionDate.split("-");
+        const parsedDate = new Date(`${year}-${month}-${day}`);
+
+        if (!prescriptionId) {
+          // First time → create doc
+          const prescriptionRef = collection(
+            db,
+            "patients",
+            patientId,
+            "prescriptions"
+          );
+          const newDoc = await addDoc(prescriptionRef, {
+            coachName,
+            content: selectedRecipe,
+            date: Timestamp.fromDate(parsedDate),
+            createdAt: Timestamp.now(),
+          });
+          setPrescriptionId(newDoc.id);
+          // console.log("🆕 Created new prescription:", newDoc.id);
+        } else {
+          // After first → update existing doc
+          const docRef = doc(
+            db,
+            "patients",
+            patientId,
+            "prescriptions",
+            prescriptionId
+          );
+          await updateDoc(docRef, {
+            coachName,
+            content: selectedRecipe,
+            date: Timestamp.fromDate(parsedDate),
+            updatedAt: Timestamp.now(),
+          });
+          if (auto) {
+            // console.log("🔄 Autosaved prescription:", prescriptionId);
+          }
+        }
+
+        if (!auto) {
+          toast.success(t.recipeAdded || "Rezept erfolgreich gespeichert!");
+          localStorage.removeItem("autosave_recipe");
+          navigate(`/patients/${patientId}`);
+        }
+      } catch (error) {
+        console.error("Error saving prescription:", error);
+        if (!auto) {
+          toast.error(
+            t.failedToSavePrescription ||
+              "Speichern des Rezepts fehlgeschlagen."
+          );
+        }
+      } finally {
+        savingRef.current = false;
+      }
+    },
+    [
+      coachName,
+      prescriptionDate,
+      selectedRecipe,
+      patientId,
+      prescriptionId,
+      navigate,
+      t,
+    ]
+  );
+  // 🔹 Autosave when recipe is added/changed and form is valid
+  useEffect(() => {
+    if (selectedRecipe?.trim() !== "") {
+      saveToDatabase(true); 
+    }
+  }, [selectedRecipe, coachName, prescriptionDate, saveToDatabase]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (selectedRecipe?.trim() !== "") {
+        saveToDatabase(true);
+      }
+    }, 3000); 
+
+    return () => clearInterval(interval);
+  }, [selectedRecipe, coachName, prescriptionDate, saveToDatabase]);
+
+  // 🔹 Manual button
+  const handleManualSave = () => {
+    saveToDatabase(false); // 👈 manual → navigates + toast
   };
 
   const handleUpdateRecipeInFirebase = async () => {
@@ -492,7 +608,7 @@ const Recipe = () => {
         </div>
 
         <button
-          onClick={handleSaveToDatabase}
+          onClick={handleManualSave}
           className="m-auto rounded-lg p-3 font-semibold text-white bg-[#2f6e44]"
         >
           {t.saveToDatabase}

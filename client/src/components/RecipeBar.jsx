@@ -62,7 +62,7 @@ const RecipeBar = ({ onPasteRemedy }) => {
             key={remedy.id}
             className={`p-2 bg-white rounded-md shadow-md cursor-pointer flex justify-between items-center transition ${
               selectedRemedy?.id === remedy.id
-                ? "bg-[#2f6e44] border-2 border-[#2f6e44] text-white"
+                ? "bg-[#2f6e44] border-2 border-[#2f6e44] text-black"
                 : "hover:bg-[#e6f4ec]"
             }`}
             onClick={() => handleSelectRemedy(remedy)}
